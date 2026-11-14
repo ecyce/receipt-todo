@@ -1,6 +1,6 @@
 // 한 번 열어두면 인터넷 없이도 열리게 캐시해둠. 페이지 고치면 VERSION 숫자 올리기
-const VERSION = 'todo-v2';
-const FILES = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
+const VERSION = 'todo-v4';
+const FILES = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './Galmuri11.woff2'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES)));
   self.skipWaiting();

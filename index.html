@@ -6,6 +6,8 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
 <style>
+/* 갈무리11 (SIL OFL 1.1, Lee Minseo) — 작은 크기에서도 깨지지 않는 픽셀 한글 폰트 */
+@font-face{font-family:"Galmuri11";src:url("Galmuri11.woff2") format("woff2");font-display:block}
 body{font-family:system-ui,-apple-system,sans-serif;margin:0 auto;padding:16px;max-width:620px;background:#efede8;color:#1d1d1d}
 .bar{display:flex;align-items:center;gap:10px;margin-bottom:14px}
 .bar button{flex:none;padding:10px 14px;font-size:15px;border:1px solid #1d1d1d;border-radius:6px;background:#fff;color:#1d1d1d}
@@ -82,7 +84,7 @@ input[type=range]{width:100%}
 <label>제목</label>
 <input type="text" id="ttitle" value="To Do">
 <div class="hint">제목이랑 맺음말은 영어만 들어가 (기기가 직접 그려서)</div>
-<label>할 일 (체크하면 Done, 최대 9개)</label>
+<label>할 일 (체크하면 Done, 9줄까지. 긴 건 두 줄로 접힘)</label>
 <div id="items"></div>
 <button class="sub" id="addItem">+ 항목 추가</button>
 <label>맺음말</label>
@@ -303,8 +305,8 @@ function lr(left,right,y,font,color){
 
 // 영수증 스타일
 // 실제 화면은 ESP32가 FreeSerif 폰트로 직접 그림. 여기 미리보기는 같은 배치로 흉내낸 거
-// 한글 항목만 폰이 그림으로 만들어서 보냄 (아래 itemBitmap)
-const RW=80,RH=14,RB=RW/8;
+// 한글 항목만 폰이 그림으로 만들어서 보냄 (아래 lineBitmap / itemLines)
+const RW=88,RH=14,RB=RW/8,IX=4;   // 기기 receipt_draw.h의 ROWW, ITEM_X랑 같아야 함
 const maxItems=()=>9;
 const ic=document.createElement('canvas');ic.width=RW;ic.height=RH;
 const ix=ic.getContext('2d',{willReadFrequently:true});
@@ -313,9 +315,10 @@ const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','De
 const DAY=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 function dateStr(){const d=new Date();return `${DAY[d.getDay()]}, ${MON[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;}
 
-function itemBitmap(text){
+// 한 줄짜리 항목 그림 (1비트, MSB부터)
+function lineBitmap(text){
   ix.fillStyle='#fff';ix.fillRect(0,0,RW,RH);
-  ix.font=`13px ${ITEM}`;ix.fillStyle='#000';ix.textBaseline='alphabetic';ix.textAlign='left';
+  ix.font='12px Galmuri11';ix.fillStyle='#000';ix.textBaseline='alphabetic';ix.textAlign='left';
   let s=text;
   if(ix.measureText(s).width>RW-1){while(s.length&&ix.measureText(s+'…').width>RW-1)s=s.slice(0,-1);s+='…';}
   ix.fillText(s,0,11);
@@ -327,6 +330,20 @@ function itemBitmap(text){
   }
   return {bits,w};
 }
+// 항목 하나를 한 줄 또는 두 줄로. 두 줄도 넘치면 끝을 …로
+function itemLines(text){
+  ix.font='12px Galmuri11';
+  const max=RW-1;
+  if(ix.measureText(text).width<=max) return [lineBitmap(text)];
+  let lo=0,hi=text.length;
+  while(lo<hi){const m=(lo+hi+1)>>1; if(ix.measureText(text.slice(0,m)).width<=max) lo=m; else hi=m-1;}
+  let k=lo;
+  const sp=text.lastIndexOf(' ',k);
+  // 되도록 띄어쓰기에서 끊되, 그러면 둘째 줄이 넘칠 때는 글자 단위로 끊기
+  if(sp>0 && ix.measureText(text.slice(sp).trimStart()).width<=max) k=sp;
+  return [lineBitmap(text.slice(0,k).trimEnd()), lineBitmap(text.slice(k).trimStart())];
+}
+const MAX_LINES=9;
 
 // 기기(receipt_draw.h)랑 같은 배치
 function drawReceipt(){
@@ -345,14 +362,20 @@ function drawReceipt(){
   // 항목
   t.font=`13px ${TIMES}`;
   const colC=PW-5-Math.round(t.measureText('Done').width/2);
-  list.forEach((it,i)=>{
-    const base=72+i*15,{bits,w}=itemBitmap(it.text);
-    t.fillStyle='#000';
-    for(let y=0;y<RH;y++)for(let x=0;x<RW;x++) if(bits[y*RB+(x>>3)]&(0x80>>(x&7))) t.fillRect(9+x,base-11+y,1,1);
-    if(it.done){
-      t.fillRect(8,base-4,w+2,1);
-      t.font=`13px ${TIMES}`;t.textAlign='right';t.fillText('Done',PW-5,base);t.textAlign='left';
-    }else t.fillRect(colC-3,base-4,7,1);
+  let li=0;
+  list.forEach(it=>{
+    itemLines(it.text).forEach(({bits,w},l)=>{
+      if(li>=MAX_LINES) return;
+      const base=72+li*15;
+      t.fillStyle='#000';
+      for(let y=0;y<RH;y++)for(let x=0;x<RW;x++) if(bits[y*RB+(x>>3)]&(0x80>>(x&7))) t.fillRect(IX+x,base-11+y,1,1);
+      if(it.done) t.fillRect(IX-1,base-4,w+2,1);
+      if(l===0){
+        if(it.done){t.font=`13px ${TIMES}`;t.textAlign='right';t.fillText('Done',PW-5,base);t.textAlign='left';}
+        else t.fillRect(colC-3,base-4,7,1);
+      }
+      li++;
+    });
   });
 
   // 합계
@@ -442,6 +465,7 @@ function finishTodo(){
   }
 }
 buildItems();
+document.fonts.load('12px Galmuri11').then(()=>{if(mode==='todo')renderTodo();});
 
 setMode('todo');   // 할 일 탭으로 시작
 
@@ -564,17 +588,21 @@ function sendTodo(){
   const list=todos.filter(it=>it.text.trim());
   if(!list.length){msg('할 일을 하나 이상 적어줘');return;}
   if(list.length>maxItems()){msg(`한 화면에 ${maxItems()}개까지만 들어가. 지금 ${list.length}개야`);return;}
-  const bmp=new Uint8Array(list.length*RB*RH),ws=[];
-  list.forEach((it,i)=>{const b=itemBitmap(it.text);bmp.set(b.bits,i*RB*RH);ws.push(b.w);});
+  const per=list.map(it=>itemLines(it.text)),total=per.reduce((a,l)=>a+l.length,0);
+  if(total>MAX_LINES){msg(`한 화면에 ${MAX_LINES}줄까지 들어가. 긴 항목이 두 줄을 먹어서 지금 ${total}줄이야`);return;}
+  const bmp=new Uint8Array(total*RB*RH),ws=[];
+  let k=0;
+  per.forEach(ls=>ls.forEach(b=>{bmp.set(b.bits,k*RB*RH);ws.push(b.w);k++;}));
   const lines=[
     'title='+ascii($('ttitle').value).slice(0,23),
     'foot='+ascii($('tfoot').value).slice(0,23),
     'date='+dateStr(),
     'n='+list.length,
     'done='+list.map(it=>it.done?'1':'0').join(''),
+    'lines='+per.map(l=>l.length).join(','),
     'w='+ws.join(','),
     'flip='+($('tflip').checked?'1':'0'),
-    ...list.map(it=>'item='+it.text.replace(/\n/g,' ').slice(0,40)),
+    ...list.map(it=>'item='+it.text.replace(/\n/g,' ').slice(0,60)),
   ];
   const hdr=new TextEncoder().encode(lines.join('\n'));
   const data=new Uint8Array(2+hdr.length+bmp.length);
@@ -584,7 +612,7 @@ function sendTodo(){
 }
 
 $('send').onclick=()=>{
-  if(mode==='todo'&&$('tstyle').value==='receipt'){sendTodo();return;}
+  if(mode==='todo'&&$('tstyle').value==='receipt'){document.fonts.load('12px Galmuri11').finally(sendTodo);return;}
   if(mode==='todo') renderTodo();
   if(!res) return;
   upload(2,pack());
